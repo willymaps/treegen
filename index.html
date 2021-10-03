@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Trees</title>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+<link href="https://api.mapbox.com/mapbox-gl-js/v2.4.1/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.4.1/mapbox-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+<style>
+body {
+    margin: 0;
+    padding: 0;
+}
+#map {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 100%;
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+mapboxgl.accessToken = 'YOUR_MAPBOX_TOKEN';
+const map = new mapboxgl.Map({
+    container: 'map', // container ID
+    style: 'mapbox://styles/mapbox/empty-v8',
+    center: [-79.41376, 43.64759], // starting position [lng, lat]
+    zoom: 18, // starting zoom
+    pitch: 40,
+    maxPitch: 70,
+    bearing: -30
+});
+
+const treeData = [];
+let initLoad = true;
+
+map.on('load', () => {
+    const numTrees = 20;
+    generateCenter(numTrees);
+});
+
+function generateCenter(numTrees) {
+    const center = map.getCenter();
+    const coords = [center.lng, center.lat]
+    const crownOptions = {steps: 10, units: 'meters'};
+    const circle = turf.circle(coords, 30, crownOptions);
+    const bbox = turf.bbox(circle);
+    const points = turf.randomPoint(numTrees, {bbox: bbox});
+
+    turf.featureEach(points, function (currentFeature, featureIndex) {
+
+        generateTrees(currentFeature.geometry.coordinates);
+
+    });
+}
+
+function generateTrees(coords) {
+
+    const center = [coords[0], coords[1]];
+    const maxBaseHeight = 7;
+    const minBaseHeight = 4;
+    const baseHeight = Math.floor(Math.random() * maxBaseHeight) + minBaseHeight;
+
+    // base build
+    const baseRadius = 0.8;
+    const baseOptions = {steps: 20, units: 'meters', properties: {color: '#d8b365',height: baseHeight-0.1,base_height:0}};
+    const base = turf.circle(center, baseRadius, baseOptions);
+
+    // crown build
+    if (base) {
+        treeData.push(base);
+        const crownNum = 60;
+        const crown = getCrown(center, crownNum, baseHeight);
+    }
+
+}
+
+function getCrown(center, num, base) {
+
+    let crownRadius = 0;
+    const crownHeight = 0.2;
+    const crownBottom = base;
+    
+    for (let i=0;i<=num;i++) {
+
+        const crownBase = crownBottom + i*crownHeight;
+
+        // summer color
+        let rgb1 = [116,196,118]    // light green
+        let rgb2 = [0,68,27]  // dark green
+
+        // fall color
+        // let rgb1 = [254,224,139] // light orange
+        // let rgb2 = [215,48,39] // red
+
+        // winter color
+        // let rgb1 = [255,255,255] // white
+        // let rgb2 = [0,68,27] // dark green
+        
+        let crownColor = getColorBetween(rgb1, rgb2, i/num);
+
+        if (i<=num/2) {
+            crownRadius = crownRadius+crownHeight/1.5;
+        } else {
+            crownRadius = crownRadius-crownHeight/1.5;
+        }
+
+        const crownOptions = {steps: 10, units: 'meters'};
+        const circle = turf.circle(center, crownRadius, crownOptions);
+        const bbox = turf.bbox(circle);
+
+        const crownPoly = getCrownPoly(bbox, crownRadius);
+        const crownPolyClean = turf.polygon([crownPoly.features[0].geometry.coordinates[0]], {color: crownColor,height: crownBase+crownHeight,base_height:crownBase});
+
+        treeData.push(crownPolyClean);
+
+        if (i === num-1) {
+            updateLayer();
+        }
+
+    }
+}
+
+function getColorBetween(color1, color2, weight) {
+    var w1 = weight;
+    var w2 = 1 - w1;
+    var rgb = [Math.round(color1[0] * w1 + color2[0] * w2),
+        Math.round(color1[1] * w1 + color2[1] * w2),
+        Math.round(color1[2] * w1 + color2[2] * w2)];
+    return rgb;
+}
+
+function getCrownPoly(bbox, w) {
+    const points = turf.randomPoint(w*8, {bbox: bbox});
+    const circleArray = [];
+    
+    for (let i=0;i<points.features.length;i++) {
+        const coords = points.features[i].geometry.coordinates;
+        const crownRadius = Math.floor(Math.random() * 1.2) + 0.85;
+        const crownOptions = {steps: 40, units: 'meters'};
+        const circle = turf.circle(coords, crownRadius, crownOptions);
+        circleArray.push(circle);
+
+        if (i === points.features.length-1) {
+            const features = turf.featureCollection(circleArray);
+            const dissolved = turf.dissolve(features, {propertyName: 'combine'});
+            return dissolved;
+        }
+    }
+}
+
+function updateLayer(data) {
+
+    const collection = turf.featureCollection(treeData);
+    if (initLoad) {
+        addLayer(collection);
+    } else {
+        map.getSource('base-source').setData(collection);
+    }
+}
+
+function addLayer(data) {
+    initLoad = false;
+    map.addSource('base-source', {
+        'type': 'geojson',
+        'data': data
+    });
+
+    map.addLayer({
+        'id': 'base-layer',
+        'type': 'fill-extrusion',
+        'source': 'base-source',
+        'layout': {},
+        'paint': {
+            'fill-extrusion-color': ['get', 'color'],
+            'fill-extrusion-height': ['get', 'height'],
+            'fill-extrusion-base': ['get', 'base_height'],
+            'fill-extrusion-opacity': 0.9,
+            'fill-extrusion-vertical-gradient': true
+        }
+    });
+}
+
+</script>
+</body>
+</html>
